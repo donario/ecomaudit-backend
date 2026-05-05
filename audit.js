@@ -391,7 +391,7 @@ RESPONDE UNICAMENTE CON JSON VALIDO en esta estructura exacta:
   try {
     const response = await client.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 4096,
+      max_tokens: 16000,
       messages: [
         { role: 'user', content: userPrompt }
       ],
@@ -399,12 +399,9 @@ RESPONDE UNICAMENTE CON JSON VALIDO en esta estructura exacta:
     });
 
     const text = response.content[0].text;
-    // Extract JSON from response (handle markdown code blocks)
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
-    }
-    return JSON.parse(text);
+    console.log('Claude response length:', text.length, 'chars');
+    console.log('Stop reason:', response.stop_reason);
+    return parseClaudeJSON(text);
   } catch (err) {
     console.error('Claude API error:', err);
     throw new Error('Failed to generate audit analysis');
@@ -412,6 +409,33 @@ RESPONDE UNICAMENTE CON JSON VALIDO en esta estructura exacta:
 }
 
 // ============================================
+function parseClaudeJSON(text) {
+  let cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*/g, '');
+  const startIdx = cleaned.indexOf('{');
+  if (startIdx === -1) throw new Error('No JSON object found');
+  let depth = 0, endIdx = -1, inStr = false, esc = false;
+  for (let i = startIdx; i < cleaned.length; i++) {
+    const ch = cleaned[i];
+    if (esc) { esc = false; continue; }
+    if (ch === '\\' && inStr) { esc = true; continue; }
+    if (ch === '"' && !esc) { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (ch === '{') depth++;
+    if (ch === '}') { depth--; if (depth === 0) { endIdx = i; break; } }
+  }
+  if (endIdx === -1) {
+    console.warn('JSON truncated, repairing...');
+    cleaned = cleaned.substring(startIdx);
+    cleaned = cleaned.replace(/,\s*"[^"]*"?\s*:?\s*[^,}\]]*$/, '');
+    const ob=(cleaned.match(/\{/g)||[]).length, cb=(cleaned.match(/\}/g)||[]).length;
+    const oq=(cleaned.match(/\[/g)||[]).length, cq=(cleaned.match(/\]/g)||[]).length;
+    cleaned += ']'.repeat(Math.max(0,oq-cq)) + '}'.repeat(Math.max(0,ob-cb));
+  } else { cleaned = cleaned.substring(startIdx, endIdx+1); }
+  cleaned = cleaned.replace(/,\s*([}\]])/g, '$1');
+  try { return JSON.parse(cleaned); }
+  catch(e) { console.error('Parse fail:', e.message); throw new Error('Failed to parse audit JSON'); }
+}
+
 // 3. MAIN AUDIT FUNCTION
 // ============================================
 
