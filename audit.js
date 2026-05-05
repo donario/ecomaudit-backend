@@ -1,23 +1,30 @@
 /**
- * EcomAudit — Backend API
+ * EcomAudit — Comprehensive Website Audit Engine v2
  *
- * Generates automated website audits using:
- * - Google PageSpeed Insights API (free)
- * - Mozilla Observatory API (free)
- * - Direct HTML analysis
- * - Claude API for recommendations
+ * Data sources (all free):
+ * - Google PageSpeed Insights API (performance, SEO, accessibility)
+ * - Direct HTML analysis (SEO, UX, CRO, content, technical)
+ * - Security headers check
+ * - Basic link health check
+ * - Claude AI for expert analysis & recommendations
  *
- * Deploy on: Vercel, Railway, or any Node.js host
+ * Audit categories (weighted scoring):
+ * - SEO (30%)
+ * - Performance (30%)
+ * - UX/UI (20%)
+ * - Conversion/CRO (20%)
+ *
+ * Additional sections: Security, Content, Technical, Mobile
  */
 
 const fetch = require('node-fetch');
 
 // ============================================
-// 1. DATA COLLECTORS (all free APIs)
+// 1. DATA COLLECTORS
 // ============================================
 
 /**
- * Google PageSpeed Insights — Performance & SEO data
+ * Google PageSpeed Insights — Performance, SEO, Accessibility
  * Free: 25,000 requests/day
  */
 async function getPageSpeedData(url, strategy = 'mobile') {
@@ -76,6 +83,11 @@ async function getPageSpeedData(url, strategy = 'mobile') {
         interactive: {
           value: audits['interactive']?.displayValue || 'N/A',
           numericValue: audits['interactive']?.numericValue || 0
+        },
+        inp: {
+          value: audits['interaction-to-next-paint']?.displayValue || 'N/A',
+          score: audits['interaction-to-next-paint']?.score || 0,
+          numericValue: audits['interaction-to-next-paint']?.numericValue || 0
         }
       },
       opportunities: (lighthouse.audits ? Object.values(lighthouse.audits)
@@ -105,13 +117,19 @@ async function getPageSpeedData(url, strategy = 'mobile') {
         linkText: audits['link-text']?.score === 1,
         isCrawlable: audits['is-crawlable']?.score === 1,
         tapTargets: audits['tap-targets']?.score === 1,
-        viewport: audits['viewport']?.score === 1
+        viewport: audits['viewport']?.score === 1,
+        structuredData: audits['structured-data']?.score === 1,
+        imageAlt: audits['image-alt']?.score === 1
       },
       pageWeight: {
         total: lighthouse.audits['total-byte-weight']?.numericValue || 0,
         totalFormatted: lighthouse.audits['total-byte-weight']?.displayValue || 'N/A'
       },
-      resourceCounts: lighthouse.audits['resource-summary']?.details?.items || []
+      resourceCounts: lighthouse.audits['resource-summary']?.details?.items || [],
+      accessibilityIssues: (lighthouse.audits ? Object.values(lighthouse.audits)
+        .filter(a => a.id && a.id.match(/^(color-contrast|document-title|html-has-lang|image-alt|label|link-name|list|meta-viewport|tabindex)/) && a.score !== null && a.score < 1)
+        .map(a => ({ id: a.id, title: a.title, description: a.description }))
+        .slice(0, 10) : [])
     };
   } catch (err) {
     console.error('PageSpeed fetch error:', err);
@@ -120,8 +138,7 @@ async function getPageSpeedData(url, strategy = 'mobile') {
 }
 
 /**
- * Security Headers Check — via direct fetch
- * Completely free, no API key needed
+ * Security Headers Check
  */
 async function getSecurityHeaders(url) {
   try {
@@ -171,70 +188,80 @@ async function getSecurityHeaders(url) {
 }
 
 /**
- * HTML Head Analysis — Direct fetch and parse
- * Free: we just fetch the page HTML
+ * Comprehensive HTML Analysis
+ * Covers: SEO, UX, CRO, Content, Technical
  */
 async function getHtmlAnalysis(url) {
   try {
     const res = await fetch(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; EcomAudit/1.0; +https://ecomaudit.shop)'
+        'User-Agent': 'Mozilla/5.0 (compatible; EcomAudit/2.0; +https://ecomaudit.shop)'
       },
       timeout: 15000
     });
 
     const html = await res.text();
-
-    // Extract head section
     const headMatch = html.match(/<head[^>]*>([\s\S]*?)<\/head>/i);
     const headHtml = headMatch ? headMatch[1] : '';
-    const bodyHtml = html;
+    const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+    const bodyHtml = bodyMatch ? bodyMatch[1] : html;
 
-    // Title
+    // ---- SEO ----
     const titleMatch = headHtml.match(/<title[^>]*>(.*?)<\/title>/i);
     const title = titleMatch ? titleMatch[1].trim() : null;
 
-    // Meta description
     const descMatch = headHtml.match(/<meta[^>]*name=["']description["'][^>]*content=["'](.*?)["']/i)
       || headHtml.match(/<meta[^>]*content=["'](.*?)["'][^>]*name=["']description["']/i);
     const metaDescription = descMatch ? descMatch[1].trim() : null;
 
-    // Canonical
     const canonicalMatch = headHtml.match(/<link[^>]*rel=["']canonical["'][^>]*href=["'](.*?)["']/i);
     const canonical = canonicalMatch ? canonicalMatch[1] : null;
 
-    // Open Graph
     const ogTitle = headHtml.match(/<meta[^>]*property=["']og:title["'][^>]*content=["'](.*?)["']/i);
     const ogDesc = headHtml.match(/<meta[^>]*property=["']og:description["'][^>]*content=["'](.*?)["']/i);
     const ogImage = headHtml.match(/<meta[^>]*property=["']og:image["'][^>]*content=["'](.*?)["']/i);
+    const ogType = headHtml.match(/<meta[^>]*property=["']og:type["'][^>]*content=["'](.*?)["']/i);
 
-    // Headings
-    const h1s = (bodyHtml.match(/<h1[^>]*>([\s\S]*?)<\/h1>/gi) || [])
-      .map(h => h.replace(/<[^>]*>/g, '').trim());
-    const h2s = (bodyHtml.match(/<h2[^>]*>([\s\S]*?)<\/h2>/gi) || [])
-      .map(h => h.replace(/<[^>]*>/g, '').trim());
+    const twitterCard = headHtml.match(/<meta[^>]*name=["']twitter:card["'][^>]*content=["'](.*?)["']/i);
+
+    const metaKeywords = headHtml.match(/<meta[^>]*name=["']keywords["'][^>]*content=["'](.*?)["']/i);
+
+    const langMatch = html.match(/<html[^>]*lang=["']([^"']+)["']/i);
+    const language = langMatch ? langMatch[1] : null;
+
+    const noindexMatch = headHtml.match(/<meta[^>]*name=["']robots["'][^>]*content=["']([^"']*)["']/i);
+    const robotsMeta = noindexMatch ? noindexMatch[1] : null;
+    const isNoindex = robotsMeta ? /noindex/i.test(robotsMeta) : false;
+
+    // Headings hierarchy
+    const h1s = (html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/gi) || [])
+      .map(h => h.replace(/<[^>]*>/g, '').trim()).filter(Boolean);
+    const h2s = (html.match(/<h2[^>]*>([\s\S]*?)<\/h2>/gi) || [])
+      .map(h => h.replace(/<[^>]*>/g, '').trim()).filter(Boolean);
+    const h3s = (html.match(/<h3[^>]*>([\s\S]*?)<\/h3>/gi) || [])
+      .map(h => h.replace(/<[^>]*>/g, '').trim()).filter(Boolean);
 
     // Images
-    const images = bodyHtml.match(/<img[^>]*>/gi) || [];
+    const images = html.match(/<img[^>]*>/gi) || [];
     const imagesWithoutAlt = images.filter(img => !img.match(/alt=["'][^"']+["']/i));
-
-    // Viewport
-    const hasViewport = /meta[^>]*name=["']viewport["']/i.test(headHtml);
-
-    // Favicon
-    const hasFavicon = /link[^>]*rel=["'][^"']*icon[^"']*["']/i.test(headHtml);
+    const imagesWithEmptyAlt = images.filter(img => img.match(/alt=["']\s*["']/i));
+    const lazyImages = images.filter(img => /loading=["']lazy["']/i.test(img));
 
     // Schema/Structured data
-    const hasSchema = /application\/ld\+json/i.test(headHtml) || /itemtype=/i.test(bodyHtml);
+    const schemaScripts = headHtml.match(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi) || [];
+    const schemaTypes = schemaScripts.map(s => {
+      const typeMatch = s.match(/"@type"\s*:\s*"([^"]+)"/);
+      return typeMatch ? typeMatch[1] : 'Unknown';
+    });
+    const hasMicrodata = /itemtype=/i.test(html);
 
-    // Sitemap check
+    // Sitemap & Robots
     let hasSitemap = false;
     try {
       const sitemapRes = await fetch(new URL('/sitemap.xml', url).href, { method: 'HEAD', timeout: 5000 });
       hasSitemap = sitemapRes.status === 200;
     } catch (_) {}
 
-    // Robots.txt check
     let hasRobots = false;
     let robotsContent = '';
     try {
@@ -245,47 +272,225 @@ async function getHtmlAnalysis(url) {
       }
     } catch (_) {}
 
+    // ---- UX/UI ----
+    const hasViewport = /meta[^>]*name=["']viewport["']/i.test(headHtml);
+    const hasFavicon = /link[^>]*rel=["'][^"']*icon[^"']*["']/i.test(headHtml);
+
+    // Navigation
+    const navElements = (html.match(/<nav[^>]*>[\s\S]*?<\/nav>/gi) || []);
+    const navLinkCount = navElements.reduce((count, nav) => {
+      return count + (nav.match(/<a[^>]*>/gi) || []).length;
+    }, 0);
+
+    // Footer
+    const hasFooter = /<footer[^>]*>/i.test(html);
+    const footerLinks = hasFooter ? (html.match(/<footer[\s\S]*?<\/footer>/i) || [''])[0].match(/<a[^>]*>/gi)?.length || 0 : 0;
+
+    // ---- CRO (Conversion) ----
+    // CTAs (buttons and link-buttons)
+    const allButtons = html.match(/<button[^>]*>[\s\S]*?<\/button>/gi) || [];
+    const ctaLinks = html.match(/<a[^>]*class=["'][^"']*btn[^"']*["'][^>]*>[\s\S]*?<\/a>/gi) || [];
+    const inputButtons = html.match(/<input[^>]*type=["'](submit|button)["'][^>]*/gi) || [];
+    const totalCTAs = allButtons.length + ctaLinks.length + inputButtons.length;
+
+    const ctaTexts = [...allButtons, ...ctaLinks].map(el =>
+      el.replace(/<[^>]*>/g, '').trim()
+    ).filter(t => t.length > 0).slice(0, 10);
+
+    // Forms
+    const forms = html.match(/<form[^>]*>[\s\S]*?<\/form>/gi) || [];
+    const formDetails = forms.map(form => {
+      const inputs = (form.match(/<input[^>]*/gi) || []).length;
+      const textareas = (form.match(/<textarea/gi) || []).length;
+      const selects = (form.match(/<select/gi) || []).length;
+      const hasAction = /action=["'][^"']+["']/i.test(form);
+      return { fields: inputs + textareas + selects, hasAction };
+    }).slice(0, 5);
+
+    // Social proof
+    const hasReviews = /review|testimoni|resena|opinion|valoraci/i.test(html);
+    const hasRatings = /rating|stars|estrellas|puntuaci/i.test(html);
+    const hasTrustBadges = /trust|badge|seguro|garantia|warranty|certificad/i.test(html);
+    const hasSocialProof = hasReviews || hasRatings || hasTrustBadges;
+
+    // Value proposition indicators
+    const hasHeroBanner = /hero|banner|jumbotron/i.test(html);
+    const hasPricing = /precio|price|plan|tarifa|\$|€/i.test(html);
+    const hasFreeShipping = /envio\s*gratis|free\s*shipping|envio\s*gratuito/i.test(html);
+    const hasGuarantee = /garantia|guarantee|devoluci|refund|money\s*back/i.test(html);
+
+    // ---- Content ----
+    // Extract visible text (rough)
+    const visibleText = html
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const wordCount = visibleText.split(/\s+/).filter(w => w.length > 2).length;
+    const paragraphs = (html.match(/<p[^>]*>[\s\S]*?<\/p>/gi) || []);
+    const avgParagraphLength = paragraphs.length > 0
+      ? Math.round(paragraphs.reduce((sum, p) => sum + p.replace(/<[^>]*>/g, '').trim().split(/\s+/).length, 0) / paragraphs.length)
+      : 0;
+
+    // ---- Technical ----
+    // Scripts
+    const externalScripts = (html.match(/<script[^>]*src=["'][^"']+["'][^>]*>/gi) || []);
+    const inlineScripts = (html.match(/<script(?![^>]*src=)[^>]*>[\s\S]*?<\/script>/gi) || []);
+    const scriptSources = externalScripts.map(s => {
+      const srcMatch = s.match(/src=["']([^"']+)["']/i);
+      return srcMatch ? srcMatch[1] : '';
+    }).filter(Boolean);
+
+    // CSS
+    const externalCSS = (headHtml.match(/<link[^>]*rel=["']stylesheet["'][^>]*>/gi) || []);
+    const inlineStyles = (html.match(/<style[^>]*>[\s\S]*?<\/style>/gi) || []);
+    const elementsWithInlineStyle = (html.match(/style=["'][^"']+["']/gi) || []).length;
+
+    // Links
+    const allLinks = html.match(/<a[^>]*href=["']([^"'#]+)["'][^>]*>/gi) || [];
+    const internalLinks = allLinks.filter(a => {
+      const hrefMatch = a.match(/href=["']([^"']+)["']/i);
+      if (!hrefMatch) return false;
+      const href = hrefMatch[1];
+      return href.startsWith('/') || href.includes(new URL(url).hostname);
+    });
+    const externalLinks = allLinks.filter(a => {
+      const hrefMatch = a.match(/href=["']([^"']+)["']/i);
+      if (!hrefMatch) return false;
+      const href = hrefMatch[1];
+      return href.startsWith('http') && !href.includes(new URL(url).hostname);
+    });
+    const linksWithNofollow = allLinks.filter(a => /rel=["'][^"']*nofollow[^"']*["']/i.test(a));
+
+    // iframes
+    const iframes = (html.match(/<iframe[^>]*>/gi) || []);
+
+    // HTML size
+    const htmlSize = Buffer.byteLength(html, 'utf8');
+
     return {
-      title: {
-        exists: !!title,
-        value: title,
-        length: title ? title.length : 0,
-        tooLong: title ? title.length > 60 : false,
-        tooShort: title ? title.length < 30 : false
+      // SEO
+      seo: {
+        title: {
+          exists: !!title,
+          value: title,
+          length: title ? title.length : 0,
+          tooLong: title ? title.length > 60 : false,
+          tooShort: title ? title.length < 30 : false
+        },
+        metaDescription: {
+          exists: !!metaDescription,
+          value: metaDescription,
+          length: metaDescription ? metaDescription.length : 0,
+          tooLong: metaDescription ? metaDescription.length > 160 : false,
+          tooShort: metaDescription ? metaDescription.length < 120 : false
+        },
+        canonical: { exists: !!canonical, value: canonical },
+        openGraph: {
+          hasTitle: !!ogTitle,
+          hasDescription: !!ogDesc,
+          hasImage: !!ogImage,
+          hasType: !!ogType
+        },
+        twitter: { hasCard: !!twitterCard },
+        keywords: metaKeywords ? metaKeywords[1] : null,
+        language,
+        robotsMeta,
+        isNoindex,
+        headings: {
+          h1Count: h1s.length,
+          h1Values: h1s.slice(0, 3),
+          h2Count: h2s.length,
+          h2Values: h2s.slice(0, 8),
+          h3Count: h3s.length,
+          multipleH1: h1s.length > 1,
+          noH1: h1s.length === 0
+        },
+        images: {
+          total: images.length,
+          withoutAlt: imagesWithoutAlt.length,
+          withEmptyAlt: imagesWithEmptyAlt.length,
+          altPercentage: images.length > 0 ? Math.round((1 - imagesWithoutAlt.length / images.length) * 100) : 100,
+          lazyLoaded: lazyImages.length
+        },
+        structuredData: {
+          hasJsonLd: schemaScripts.length > 0,
+          types: schemaTypes,
+          hasMicrodata
+        },
+        sitemap: hasSitemap,
+        robots: { exists: hasRobots, content: robotsContent.substring(0, 500) },
+        links: {
+          internal: internalLinks.length,
+          external: externalLinks.length,
+          nofollow: linksWithNofollow.length
+        }
       },
-      metaDescription: {
-        exists: !!metaDescription,
-        value: metaDescription,
-        length: metaDescription ? metaDescription.length : 0,
-        tooLong: metaDescription ? metaDescription.length > 160 : false,
-        tooShort: metaDescription ? metaDescription.length < 120 : false
+
+      // UX/UI
+      ux: {
+        hasViewport,
+        hasFavicon,
+        navigation: {
+          hasNav: navElements.length > 0,
+          navCount: navElements.length,
+          navLinks: navLinkCount
+        },
+        footer: {
+          hasFooter,
+          footerLinks
+        }
       },
-      canonical: { exists: !!canonical, value: canonical },
-      openGraph: {
-        hasTitle: !!ogTitle,
-        hasDescription: !!ogDesc,
-        hasImage: !!ogImage
+
+      // CRO (Conversion)
+      cro: {
+        ctas: {
+          total: totalCTAs,
+          buttons: allButtons.length,
+          linkButtons: ctaLinks.length,
+          texts: ctaTexts
+        },
+        forms: {
+          count: forms.length,
+          details: formDetails
+        },
+        socialProof: {
+          hasReviews,
+          hasRatings,
+          hasTrustBadges,
+          hasSocialProof
+        },
+        valueProposition: {
+          hasHeroBanner,
+          hasPricing,
+          hasFreeShipping,
+          hasGuarantee
+        }
       },
-      headings: {
-        h1Count: h1s.length,
-        h1Values: h1s.slice(0, 3),
-        h2Count: h2s.length,
-        h2Values: h2s.slice(0, 5),
-        multipleH1: h1s.length > 1,
-        noH1: h1s.length === 0
+
+      // Content
+      content: {
+        wordCount,
+        paragraphCount: paragraphs.length,
+        avgParagraphLength,
+        htmlSize: Math.round(htmlSize / 1024) + ' KB'
       },
-      images: {
-        total: images.length,
-        withoutAlt: imagesWithoutAlt.length,
-        altPercentage: images.length > 0 ? Math.round((1 - imagesWithoutAlt.length / images.length) * 100) : 100
-      },
-      mobile: {
-        hasViewport
-      },
-      favicon: hasFavicon,
-      schema: hasSchema,
-      sitemap: hasSitemap,
-      robots: { exists: hasRobots, content: robotsContent.substring(0, 500) }
+
+      // Technical
+      technical: {
+        scripts: {
+          external: externalScripts.length,
+          inline: inlineScripts.length,
+          sources: scriptSources.slice(0, 15)
+        },
+        css: {
+          externalSheets: externalCSS.length,
+          inlineStyles: inlineStyles.length,
+          elementsWithInlineStyle
+        },
+        iframes: iframes.length
+      }
     };
   } catch (err) {
     console.error('HTML analysis error:', err);
@@ -293,99 +498,220 @@ async function getHtmlAnalysis(url) {
   }
 }
 
+/**
+ * Basic Link Health Check
+ * Checks a sample of internal links for broken ones
+ */
+async function checkLinkHealth(url) {
+  try {
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; EcomAudit/2.0)' },
+      timeout: 10000
+    });
+    const html = await res.text();
+    const baseUrl = new URL(url);
+
+    // Extract internal links
+    const linkRegex = /href=["'](\/[^"']*|https?:\/\/[^"']*)/gi;
+    const links = new Set();
+    let match;
+    while ((match = linkRegex.exec(html)) !== null) {
+      let href = match[1];
+      if (href.startsWith('/')) href = baseUrl.origin + href;
+      if (href.includes(baseUrl.hostname)) links.add(href);
+    }
+
+    // Check up to 15 links
+    const linksToCheck = Array.from(links).slice(0, 15);
+    const results = await Promise.allSettled(
+      linksToCheck.map(async (link) => {
+        try {
+          const r = await fetch(link, { method: 'HEAD', timeout: 5000, redirect: 'follow' });
+          return { url: link, status: r.status, ok: r.status < 400 };
+        } catch (e) {
+          return { url: link, status: 0, ok: false, error: e.message };
+        }
+      })
+    );
+
+    const checked = results.map(r => r.value || r.reason);
+    const broken = checked.filter(r => !r.ok);
+    const redirects = checked.filter(r => r.status >= 300 && r.status < 400);
+
+    return {
+      totalChecked: linksToCheck.length,
+      broken: broken.map(b => ({ url: b.url, status: b.status })),
+      brokenCount: broken.length,
+      redirects: redirects.length,
+      healthPercentage: linksToCheck.length > 0
+        ? Math.round(((linksToCheck.length - broken.length) / linksToCheck.length) * 100)
+        : 100
+    };
+  } catch (err) {
+    console.error('Link health check error:', err);
+    return null;
+  }
+}
+
 // ============================================
-// 2. CLAUDE AI — Generate recommendations
+// 2. CLAUDE AI — Expert Analysis
 // ============================================
 
 async function generateAuditWithClaude(collectedData, plan = 'growth') {
   const Anthropic = require('@anthropic-ai/sdk');
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-  const planInstructions = {
-    starter: 'Genera solo las secciones: SEO, Rendimiento. Recomendaciones basicas (lista simple).',
-    growth: 'Genera todas las secciones: SEO, Rendimiento, Movil, Seguridad, UX. Recomendaciones detalladas y priorizadas. Incluye analisis de 2 competidores si hay datos.',
-    pro: 'Genera el informe mas completo posible con todas las secciones. Recomendaciones con pasos exactos de implementacion. Analisis de hasta 5 competidores. Incluye estimacion de impacto en conversiones.'
+  const planDepth = {
+    starter: 'Genera un informe basico centrado en SEO y Rendimiento. Maximo 3 problemas por categoria. Recomendaciones simples.',
+    growth: 'Genera un informe completo con TODAS las 8 categorias. 3-5 problemas por categoria. Recomendaciones detalladas con pasos de implementacion. Incluye analisis de puntos de conversion.',
+    pro: 'Genera el informe MAS COMPLETO posible con las 8 categorias. Hasta 8 problemas por categoria. Recomendaciones con pasos exactos, codigo de ejemplo cuando aplique, y estimacion de impacto en conversiones. Incluye benchmark contra mejores practicas del sector.'
   };
 
-  const systemPrompt = `Eres un experto en auditoria web con mas de 15 anos de experiencia en SEO, rendimiento web, seguridad y UX para tiendas e-commerce. Tu trabajo es analizar los datos tecnicos de un sitio web y producir un informe claro, accionable y profesional en espanol.
+  const systemPrompt = `Eres un consultor senior de e-commerce con 15+ anos de experiencia en SEO, rendimiento web, UX/UI, CRO (optimizacion de conversiones), seguridad, y estrategia de contenido. Has auditado cientos de tiendas online y sabes exactamente que impacta las ventas.
 
-REGLAS:
-1. Se especifico. No digas "mejorar SEO" - di exactamente que cambiar y donde.
-2. Prioriza por impacto/esfuerzo. Quick wins primero.
-3. Usa lenguaje que un dueno de tienda online (no tecnico) entienda.
-4. Si no tienes datos suficientes para evaluar algo, indica "insufficient_data".
-5. Las recomendaciones deben ser accionables HOY, no genericas.
-6. Enfocate en como cada problema afecta las VENTAS y CONVERSIONES.`;
+Tu trabajo: analizar datos tecnicos de un sitio web y producir un informe PROFESIONAL y ACCIONABLE en espanol.
 
-  const userPrompt = `Analiza estos datos de auditoria y genera un informe completo en JSON.
+PRINCIPIOS:
+1. ESPECIFICIDAD: Nunca digas "mejorar SEO". Di exactamente QUE cambiar, DONDE, y COMO.
+2. PRIORIDAD: Ordena por impacto/esfuerzo. Quick wins primero (alto impacto + bajo esfuerzo).
+3. LENGUAJE CLARO: Escribe para un dueno de tienda online, no para un desarrollador.
+4. ENFOQUE EN VENTAS: Cada problema debe explicar como afecta las ventas/conversiones.
+5. DATOS INSUFICIENTES: Si no puedes evaluar algo, usa "insufficient_data". No inventes.
+6. HONESTIDAD: Si algo esta bien, dilo. No infles problemas para parecer mas completo.
+
+SISTEMA DE PUNTUACION:
+- Score global = SEO(30%) + Performance(30%) + UX(20%) + CRO(20%)
+- Cada categoria: 0-100
+- Status: "critical" (<40), "needs_work" (40-69), "good" (70-89), "excellent" (90-100)
+- Prioridad de issues: impacto x esfuerzo (alto impacto + bajo esfuerzo = prioridad maxima)`;
+
+  const userPrompt = `Analiza estos datos de auditoria del sitio web y genera un informe COMPLETO.
 
 DATOS RECOPILADOS:
 ${JSON.stringify(collectedData, null, 2)}
 
-PLAN DEL CLIENTE: ${plan}
-INSTRUCCIONES ESPECIFICAS: ${planInstructions[plan]}
+NIVEL DE DETALLE: ${planDepth[plan]}
 
-RESPONDE UNICAMENTE CON JSON VALIDO en esta estructura exacta:
+RESPONDE UNICAMENTE CON JSON VALIDO en esta estructura:
 {
-  "global_score": <0-100>,
-  "summary": "<Resumen ejecutivo en 2-3 frases>",
+  "global_score": <0-100, calculado como SEO*0.3 + Performance*0.3 + UX*0.2 + CRO*0.2>,
+  "summary": "<Resumen ejecutivo en 3-4 frases. Que va bien, que es critico, y cual es la accion mas urgente>",
+
   "categories": {
     "seo": {
       "score": <0-100>,
       "status": "<critical|needs_work|good|excellent>",
+      "highlights": ["<1-3 puntos positivos si los hay>"],
       "issues": [
         {
+          "id": "<seo_001>",
           "severity": "<critical|important|minor>",
-          "title": "<Titulo del problema>",
-          "description": "<Que esta mal y por que importa para las ventas>",
-          "recommendation": "<Exactamente que hacer paso a paso>",
-          "impact": "<Impacto esperado en trafico/conversiones>",
+          "title": "<Titulo claro del problema>",
+          "current_state": "<Que hay ahora (dato concreto)>",
+          "expected_state": "<Que deberia haber>",
+          "description": "<Por que esto importa para las ventas>",
+          "recommendation": "<Pasos exactos para solucionarlo>",
+          "impact": "<high|medium|low>",
           "effort": "<low|medium|high>",
-          "timeframe": "<Tiempo estimado para implementar>"
+          "priority": "<Resultado: impacto vs esfuerzo = maxima|alta|media|baja>",
+          "timeframe": "<Tiempo estimado>"
         }
       ]
     },
     "performance": {
       "score": <0-100>,
       "status": "<critical|needs_work|good|excellent>",
-      "metrics": {
-        "lcp": {"value": "<Xs>", "rating": "<good|needs_improvement|poor>"},
-        "fcp": {"value": "<Xs>", "rating": "<good|needs_improvement|poor>"},
-        "cls": {"value": "<X>", "rating": "<good|needs_improvement|poor>"},
-        "ttfb": {"value": "<Xms>", "rating": "<good|needs_improvement|poor>"},
-        "page_weight": "<X MB>",
-        "requests": <number>
+      "core_web_vitals": {
+        "lcp": {"value": "<Xs>", "rating": "<good|needs_improvement|poor>", "target": "<2.5s"},
+        "cls": {"value": "<X>", "rating": "<good|needs_improvement|poor>", "target": "<0.1"},
+        "inp": {"value": "<Xms>", "rating": "<good|needs_improvement|poor>", "target": "<200ms"},
+        "fcp": {"value": "<Xs>", "rating": "<good|needs_improvement|poor>", "target": "<1.8s"},
+        "ttfb": {"value": "<Xms>", "rating": "<good|needs_improvement|poor>", "target": "<800ms"}
       },
-      "issues": [<same structure as seo issues>]
+      "page_weight": "<X MB>",
+      "total_requests": <number>,
+      "highlights": ["<puntos positivos>"],
+      "issues": [<misma estructura que seo>]
     },
     "mobile": {
       "score": <0-100>,
       "status": "<critical|needs_work|good|excellent>",
-      "issues": [<same structure>]
+      "is_mobile_friendly": <true|false>,
+      "highlights": ["<puntos positivos>"],
+      "issues": [<misma estructura>]
+    },
+    "ux_ui": {
+      "score": <0-100>,
+      "status": "<critical|needs_work|good|excellent>",
+      "evaluation": {
+        "navigation": {"score": <1-5>, "notes": "<observacion>"},
+        "visual_hierarchy": {"score": <1-5>, "notes": "<observacion>"},
+        "readability": {"score": <1-5>, "notes": "<observacion>"},
+        "consistency": {"score": <1-5>, "notes": "<observacion>"},
+        "mobile_ux": {"score": <1-5>, "notes": "<observacion>"}
+      },
+      "highlights": ["<puntos positivos>"],
+      "issues": [<misma estructura>]
+    },
+    "conversion": {
+      "score": <0-100>,
+      "status": "<critical|needs_work|good|excellent>",
+      "evaluation": {
+        "cta_clarity": {"score": <1-5>, "notes": "<evaluacion de CTAs encontrados>"},
+        "value_proposition": {"score": <1-5>, "notes": "<claridad de la propuesta de valor>"},
+        "trust_signals": {"score": <1-5>, "notes": "<presencia de pruebas sociales, garantias>"},
+        "friction_points": {"score": <1-5>, "notes": "<puntos de friccion encontrados>"},
+        "form_optimization": {"score": <1-5>, "notes": "<evaluacion de formularios>"}
+      },
+      "highlights": ["<puntos positivos>"],
+      "issues": [<misma estructura>]
     },
     "security": {
       "score": <0-100>,
       "status": "<critical|needs_work|good|excellent>",
       "headers_present": [<list>],
       "headers_missing": [<list>],
-      "issues": [<same structure>]
+      "highlights": ["<puntos positivos>"],
+      "issues": [<misma estructura>]
     },
-    "ux": {
+    "content": {
       "score": <0-100>,
       "status": "<critical|needs_work|good|excellent>",
-      "issues": [<same structure>]
+      "evaluation": {
+        "quality": {"score": <1-5>, "notes": "<calidad general del contenido>"},
+        "scannability": {"score": <1-5>, "notes": "<facilidad de escaneo visual>"},
+        "seo_optimization": {"score": <1-5>, "notes": "<optimizacion del contenido para SEO>"}
+      },
+      "highlights": ["<puntos positivos>"],
+      "issues": [<misma estructura>]
+    },
+    "technical": {
+      "score": <0-100>,
+      "status": "<critical|needs_work|good|excellent>",
+      "link_health": {
+        "checked": <number>,
+        "broken": <number>,
+        "health_percentage": <number>
+      },
+      "highlights": ["<puntos positivos>"],
+      "issues": [<misma estructura>]
     }
   },
+
   "priority_actions": [
     {
       "rank": <1-10>,
-      "action": "<Que hacer>",
-      "category": "<seo|performance|mobile|security|ux>",
+      "action": "<Que hacer exactamente>",
+      "category": "<seo|performance|mobile|ux_ui|conversion|security|content|technical>",
+      "impact": "<high|medium|low>",
       "effort": "<low|medium|high>",
-      "impact": "<low|medium|high>",
-      "timeframe": "<Tiempo estimado>"
+      "priority": "<maxima|alta|media|baja>",
+      "timeframe": "<Tiempo estimado>",
+      "expected_result": "<Que mejora se espera>"
     }
-  ]
+  ],
+
+  "competitor_insights": "<Si hay datos suficientes, observaciones sobre practicas estandar del sector e-commerce que este sitio deberia adoptar. Si no hay datos, null.>"
 }`;
 
   try {
@@ -409,6 +735,8 @@ RESPONDE UNICAMENTE CON JSON VALIDO en esta estructura exacta:
 }
 
 // ============================================
+// JSON Parser (robust, handles truncation)
+// ============================================
 function parseClaudeJSON(text) {
   let cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*/g, '');
   const startIdx = cleaned.indexOf('{');
@@ -427,32 +755,52 @@ function parseClaudeJSON(text) {
     console.warn('JSON truncated, repairing...');
     cleaned = cleaned.substring(startIdx);
     cleaned = cleaned.replace(/,\s*"[^"]*"?\s*:?\s*[^,}\]]*$/, '');
-    const ob=(cleaned.match(/\{/g)||[]).length, cb=(cleaned.match(/\}/g)||[]).length;
-    const oq=(cleaned.match(/\[/g)||[]).length, cq=(cleaned.match(/\]/g)||[]).length;
-    cleaned += ']'.repeat(Math.max(0,oq-cq)) + '}'.repeat(Math.max(0,ob-cb));
-  } else { cleaned = cleaned.substring(startIdx, endIdx+1); }
+    const ob = (cleaned.match(/\{/g) || []).length, cb = (cleaned.match(/\}/g) || []).length;
+    const oq = (cleaned.match(/\[/g) || []).length, cq = (cleaned.match(/\]/g) || []).length;
+    cleaned += ']'.repeat(Math.max(0, oq - cq)) + '}'.repeat(Math.max(0, ob - cb));
+  } else {
+    cleaned = cleaned.substring(startIdx, endIdx + 1);
+  }
   cleaned = cleaned.replace(/,\s*([}\]])/g, '$1');
   try { return JSON.parse(cleaned); }
-  catch(e) { console.error('Parse fail:', e.message); throw new Error('Failed to parse audit JSON'); }
+  catch (e) { console.error('Parse fail:', e.message); throw new Error('Failed to parse audit JSON'); }
 }
 
+// ============================================
 // 3. MAIN AUDIT FUNCTION
 // ============================================
 
 async function runAudit(url, plan = 'growth') {
-  console.log(`Starting audit for: ${url} (Plan: ${plan})`);
+  console.log(`\n========================================`);
+  console.log(`EcomAudit v2 — Starting audit`);
+  console.log(`URL: ${url}`);
+  console.log(`Plan: ${plan}`);
+  console.log(`========================================\n`);
 
   // Normalize URL
   if (!url.startsWith('http')) url = 'https://' + url;
 
-  // Collect data in parallel (all free APIs)
-  console.log('Collecting data...');
-  const [pageSpeedMobile, pageSpeedDesktop, securityHeaders, htmlAnalysis] = await Promise.all([
+  // Collect all data in parallel
+  console.log('[1/5] Collecting PageSpeed data (mobile)...');
+  console.log('[2/5] Collecting PageSpeed data (desktop)...');
+  console.log('[3/5] Checking security headers...');
+  console.log('[4/5] Analyzing HTML structure...');
+  console.log('[5/5] Checking link health...');
+
+  const [pageSpeedMobile, pageSpeedDesktop, securityHeaders, htmlAnalysis, linkHealth] = await Promise.all([
     getPageSpeedData(url, 'mobile'),
     getPageSpeedData(url, 'desktop'),
     getSecurityHeaders(url),
-    getHtmlAnalysis(url)
+    getHtmlAnalysis(url),
+    checkLinkHealth(url)
   ]);
+
+  console.log('\nData collection complete:');
+  console.log(`  PageSpeed Mobile: ${pageSpeedMobile ? 'OK' : 'FAILED'}`);
+  console.log(`  PageSpeed Desktop: ${pageSpeedDesktop ? 'OK' : 'FAILED'}`);
+  console.log(`  Security Headers: ${securityHeaders ? 'OK' : 'FAILED'}`);
+  console.log(`  HTML Analysis: ${htmlAnalysis ? 'OK' : 'FAILED'}`);
+  console.log(`  Link Health: ${linkHealth ? 'OK' : 'FAILED'}`);
 
   const collectedData = {
     url,
@@ -462,13 +810,14 @@ async function runAudit(url, plan = 'growth') {
       desktop: pageSpeedDesktop
     },
     security: securityHeaders,
-    html: htmlAnalysis
+    html: htmlAnalysis,
+    linkHealth
   };
 
-  console.log('Generating AI analysis...');
+  console.log('\nGenerating AI analysis with Claude...');
   const auditReport = await generateAuditWithClaude(collectedData, plan);
 
-  // Merge raw metrics into the report
+  // Attach raw data for reference
   auditReport.raw_data = {
     pageSpeed: {
       mobile: pageSpeedMobile?.scores,
@@ -480,30 +829,38 @@ async function runAudit(url, plan = 'growth') {
       missing: securityHeaders.missing
     } : null,
     html: htmlAnalysis ? {
-      title: htmlAnalysis.title,
-      metaDescription: htmlAnalysis.metaDescription,
-      headings: htmlAnalysis.headings,
-      images: htmlAnalysis.images
-    } : null
+      seo: htmlAnalysis.seo,
+      cro: htmlAnalysis.cro,
+      content: htmlAnalysis.content
+    } : null,
+    linkHealth: linkHealth || null
   };
 
   auditReport.metadata = {
     url,
     plan,
+    version: '2.0',
     generated_at: new Date().toISOString(),
-    next_audit: getNextAuditDate(plan)
+    next_audit: getNextAuditDate(plan),
+    data_sources: [
+      'Google PageSpeed Insights API',
+      'Direct HTML Analysis',
+      'Security Headers Check',
+      'Link Health Check',
+      'Claude AI Analysis'
+    ]
   };
 
-  console.log(`Audit complete! Global score: ${auditReport.global_score}/100`);
+  console.log(`\nAudit complete! Global score: ${auditReport.global_score}/100`);
   return auditReport;
 }
 
 function getNextAuditDate(plan) {
   const now = new Date();
   switch (plan) {
-    case 'pro': now.setDate(now.getDate() + 7); break;      // Weekly
-    case 'growth': now.setDate(now.getDate() + 14); break;   // Bi-weekly
-    case 'starter': now.setMonth(now.getMonth() + 1); break; // Monthly
+    case 'pro': now.setDate(now.getDate() + 7); break;
+    case 'growth': now.setDate(now.getDate() + 14); break;
+    case 'starter': now.setMonth(now.getMonth() + 1); break;
   }
   return now.toISOString();
 }
@@ -517,5 +874,6 @@ module.exports = {
   getPageSpeedData,
   getSecurityHeaders,
   getHtmlAnalysis,
+  checkLinkHealth,
   generateAuditWithClaude
 };
