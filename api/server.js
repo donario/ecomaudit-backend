@@ -8,12 +8,15 @@
  *
  * Environment variables needed:
  * ANTHROPIC_API_KEY  — Claude API key
+ * RESEND_API_KEY     — Resend email API key
+ * FROM_EMAIL         — Sender email (default: auditorias@ecomaudit.shop)
  * PORT               — Server port (default: 3000)
  */
 
 const express = require('express');
 const cors = require('cors');
 const { runAudit } = require('./audit');
+const { sendAuditEmail } = require('./email');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -59,7 +62,7 @@ app.post('/api/audit', async (req, res) => {
   res.json({
     id: auditId,
     status: 'processing',
-    message: 'Auditoria en proceso. Consulta el estado en /api/audit/' + auditId
+    message: 'Auditoría en proceso. Consulta el estado en /api/audit/' + auditId
   });
 
   // Generate audit in background
@@ -75,10 +78,15 @@ app.post('/api/audit', async (req, res) => {
       completed_at: new Date().toISOString(),
       result
     });
-    console.log(`Audit ${auditId} completed for ${url}`);
+    console.log(`✅ Audit ${auditId} completed for ${url}`);
+
+    // Send email with results
+    if (email) {
+      await sendAuditEmail(email, result, url, plan);
+    }
 
   } catch (err) {
-    console.error(`Audit ${auditId} failed:`, err.message);
+    console.error(`❌ Audit ${auditId} failed:`, err.message);
     audits.set(auditId, {
       ...audits.get(auditId),
       status: 'failed',
@@ -98,8 +106,11 @@ app.get('/api/audit/:id', (req, res) => {
 
 // Webhook endpoint for Shopify (when customer purchases)
 app.post('/api/webhook/shopify', async (req, res) => {
+  // Verify Shopify webhook signature in production
+  // const hmac = req.headers['x-shopify-hmac-sha256'];
+
   const order = req.body;
-  console.log('New Shopify order received');
+  console.log('📦 New Shopify order received');
 
   // Extract URL from order notes or custom field
   const websiteUrl = order.note || order.note_attributes?.find(a => a.name === 'website_url')?.value;
@@ -127,13 +138,19 @@ app.post('/api/webhook/shopify', async (req, res) => {
     });
 
     // Run audit in background
-    runAudit(websiteUrl, plan).then(result => {
+    runAudit(websiteUrl, plan).then(async (result) => {
       audits.set(auditId, {
         ...audits.get(auditId),
         status: 'completed',
         completed_at: new Date().toISOString(),
         result
       });
+      console.log(`✅ Audit ${auditId} completed for ${websiteUrl}`);
+
+      // Send email with results
+      if (customerEmail) {
+        await sendAuditEmail(customerEmail, result, websiteUrl, plan);
+      }
     }).catch(err => {
       audits.set(auditId, {
         ...audits.get(auditId),
@@ -151,7 +168,12 @@ app.post('/api/webhook/shopify', async (req, res) => {
 // ============================================
 
 app.listen(PORT, () => {
-  console.log(`EcomAudit Backend API running on port ${PORT}`);
+  console.log(`
+╔══════════════════════════════════════╗
+║       EcomAudit Backend API          ║
+║       Running on port ${PORT}            ║
+╚══════════════════════════════════════╝
+  `);
 });
 
 module.exports = app;
