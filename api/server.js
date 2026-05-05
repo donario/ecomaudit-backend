@@ -15,7 +15,7 @@
 
 const express = require('express');
 const cors = require('cors');
-const { runAudit } = require('./audit');
+const { runAudit } = require('../audit');
 const { sendAuditEmail } = require('./email');
 
 const app = express();
