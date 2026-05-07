@@ -722,7 +722,7 @@ RESPONDE UNICAMENTE CON JSON VALIDO en esta estructura:
         { role: 'user', content: userPrompt }
       ],
       system: systemPrompt
-    });
+    }, { timeout: 600000 });
 
     const text = response.content[0].text;
     console.log('Claude response length:', text.length, 'chars');
