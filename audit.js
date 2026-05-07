@@ -715,14 +715,15 @@ RESPONDE UNICAMENTE CON JSON VALIDO en esta estructura:
 }`;
 
   try {
-    const response = await client.messages.create({
+        const stream = client.messages.stream({})
       model: 'claude-sonnet-4-6',
       max_tokens: 28000,
       messages: [
         { role: 'user', content: userPrompt }
       ],
       system: systemPrompt
-    }, { timeout: 600000 });
+    });
+        const response = await stream.finalMessage();
 
     const text = response.content[0].text;
     console.log('Claude response length:', text.length, 'chars');
