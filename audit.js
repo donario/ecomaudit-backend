@@ -717,7 +717,7 @@ RESPONDE UNICAMENTE CON JSON VALIDO en esta estructura:
   try {
     const response = await client.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 32000,
+      max_tokens: 28000,
       messages: [
         { role: 'user', content: userPrompt }
       ],
