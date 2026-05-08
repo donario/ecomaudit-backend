@@ -145,8 +145,8 @@ app.post('/analyze', async (req, res) => {
       auditId,
       status: 'done',
       scores,
-      issues: result.issues || result.top_issues || [],
-      quickWins: result.quickWins || result.quick_wins || result.recommendations || [],
+      issues: result.issues || result.top_issues || result.priority_actions?.map(a => ({ title: a.action, description: a.expected_impact || a.impact || '' })) || [],
+      quickWins: result.quickWins || result.quick_wins || result.recommendations || result.priority_actions?.filter((_, i) => i < 3).map(a => ({ title: a.action, description: a.expected_impact || a.impact || '' })) || [],
       summary: result.summary || result.executive_summary || result.resumen || '',
       pdfUrl: result.pdfUrl || null,
       // Pass full result for debugging/future use
