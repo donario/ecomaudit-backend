@@ -20,6 +20,7 @@ const express = require('express');
 const cors = require('cors');
 const { runAudit } = require('../audit');
 const { sendAuditEmail } = require('./email');
+const { startCron } = require('./cron');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -281,6 +282,9 @@ app.post('/shopify/webhook', async (req, res) => {
 // ==============================================
 
 app.listen(PORT, () => {
+  // Start auto-audit cron scheduler
+  startCron();
+
   console.log(`
 ╔═══════════════════════════════════════╗
 ║     EcomAudit Backend API             ║
